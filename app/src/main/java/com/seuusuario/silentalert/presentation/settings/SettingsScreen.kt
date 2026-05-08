@@ -1,5 +1,9 @@
 package com.seuusuario.silentalert.presentation.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -7,9 +11,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.seuusuario.silentalert.domain.model.AlertChannel
@@ -18,6 +25,18 @@ import com.seuusuario.silentalert.domain.model.Contact
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    var smsGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
+                == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> smsGranted = granted }
 
     if (state.savedSuccess) {
         LaunchedEffect(Unit) { viewModel.dismissSuccess() }
@@ -31,6 +50,15 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     ) {
         item {
             Text("Configurações", style = MaterialTheme.typography.headlineSmall)
+        }
+
+        // Banner de permissão SMS
+        if (!smsGranted) {
+            item {
+                SmsPermissionBanner(
+                    onRequest = { smsPermissionLauncher.launch(Manifest.permission.SEND_SMS) }
+                )
+            }
         }
 
         item {
@@ -65,7 +93,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         }
 
         item {
-            AddContactSection(onAdd = viewModel::addContact)
+            AddContactSection(
+                smsGranted = smsGranted,
+                onRequestSms = { smsPermissionLauncher.launch(Manifest.permission.SEND_SMS) },
+                onAdd = viewModel::addContact
+            )
         }
 
         item {
@@ -81,6 +113,38 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         state.error?.let { error ->
             item {
                 Text(error, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmsPermissionBanner(onRequest: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Permissão de SMS necessária para alertas offline",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = onRequest,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("Permitir")
             }
         }
     }
@@ -106,7 +170,11 @@ private fun ContactItem(contact: Contact, onDelete: () -> Unit) {
 }
 
 @Composable
-private fun AddContactSection(onAdd: (Contact) -> Unit) {
+private fun AddContactSection(
+    smsGranted: Boolean,
+    onRequestSms: () -> Unit,
+    onAdd: (Contact) -> Unit
+) {
     var name  by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -129,22 +197,37 @@ private fun AddContactSection(onAdd: (Contact) -> Unit) {
                 value = email, onValueChange = { email = it },
                 label = { Text("E-mail") }, modifier = Modifier.fillMaxWidth()
             )
+
+            if (!smsGranted) {
+                Text(
+                    text = "SMS desativado — contato receberá apenas por e-mail e push",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             Button(
                 onClick = {
                     if (name.isNotBlank() && phone.isNotBlank()) {
+                        val channels = buildSet {
+                            if (smsGranted) add(AlertChannel.SMS)
+                            add(AlertChannel.EMAIL)
+                        }
                         onAdd(
                             Contact(
                                 name     = name.trim(),
                                 phone    = phone.trim(),
                                 email    = email.trim(),
-                                channels = setOf(AlertChannel.SMS, AlertChannel.EMAIL)
+                                channels = channels
                             )
                         )
                         name = ""; phone = ""; email = ""
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Adicionar") }
+            ) {
+                Text("Adicionar")
+            }
         }
     }
 }
