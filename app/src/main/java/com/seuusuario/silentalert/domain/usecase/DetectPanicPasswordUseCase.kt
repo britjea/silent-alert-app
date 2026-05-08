@@ -7,8 +7,7 @@ class DetectPanicPasswordUseCase @Inject constructor(
     private val repository: AlertRepository
 ) {
     suspend operator fun invoke(enteredPassword: String): Boolean {
-        val config = repository.getAlertConfig()
-        return enteredPassword.isNotBlank() &&
-               enteredPassword == config.panicPassword
+        if (enteredPassword.isBlank()) return false
+        return repository.verifyPanicPassword(enteredPassword)
     }
 }

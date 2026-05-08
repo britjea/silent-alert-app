@@ -1,10 +1,13 @@
 package com.seuusuario.silentalert.presentation.lock
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkManager
+import com.seuusuario.silentalert.core.worker.AlertDispatchWorker
 import com.seuusuario.silentalert.domain.usecase.DetectPanicPasswordUseCase
-import com.seuusuario.silentalert.domain.usecase.TriggerSilentAlertUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,7 +17,7 @@ import javax.inject.Inject
 @HiltViewModel
 class LockViewModel @Inject constructor(
     private val detectPanic: DetectPanicPasswordUseCase,
-    private val triggerAlert: TriggerSilentAlertUseCase
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<LockUiState>(LockUiState.Idle)
@@ -23,12 +26,11 @@ class LockViewModel @Inject constructor(
     fun onPasswordSubmitted(password: String) {
         _uiState.value = LockUiState.Unlocking
         viewModelScope.launch {
-            val isPanic = detectPanic(password)
-            if (isPanic) {
-                // Dispara silenciosamente — sem alertar o usuário
-                triggerAlert()
+            if (detectPanic(password)) {
+                // Enqueue via WorkManager — survives network loss, retries automatically
+                WorkManager.getInstance(context).enqueue(AlertDispatchWorker.buildRequest())
             }
-            // Sempre desbloqueia normalmente, seja senha normal ou de pânico
+            // Always unlocks normally — no visual difference for the aggressor
             _uiState.value = LockUiState.UnlockNormal
         }
     }

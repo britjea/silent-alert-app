@@ -3,6 +3,7 @@ package com.seuusuario.silentalert.data.repository
 import com.seuusuario.silentalert.data.local.db.AlertDatabase
 import com.seuusuario.silentalert.data.local.db.ContactEntity
 import com.seuusuario.silentalert.data.local.prefs.SecurePreferencesDataSource
+import com.seuusuario.silentalert.data.local.sms.SmsSender
 import com.seuusuario.silentalert.data.remote.api.NotificationApi
 import com.seuusuario.silentalert.data.remote.dto.AlertPayloadDto
 import com.seuusuario.silentalert.data.remote.dto.RecipientDto
@@ -18,22 +19,29 @@ import javax.inject.Singleton
 class AlertRepositoryImpl @Inject constructor(
     private val db: AlertDatabase,
     private val prefs: SecurePreferencesDataSource,
-    private val api: NotificationApi
+    private val api: NotificationApi,
+    private val smsSender: SmsSender
 ) : AlertRepository {
 
     override suspend fun getAlertConfig(): AlertConfig {
         val contacts = db.contactDao().getAllContacts().first().map { it.toDomain() }
+        // panicPassword is intentionally blank — callers must use verifyPanicPassword()
         return AlertConfig(
-            panicPassword = prefs.getPanicPassword(),
+            panicPassword = "",
             message       = prefs.getAlertMessage(),
             contacts      = contacts
         )
     }
 
     override suspend fun saveAlertConfig(config: AlertConfig) {
-        prefs.savePanicPassword(config.panicPassword)
+        if (config.panicPassword.isNotBlank()) {
+            prefs.savePanicPassword(config.panicPassword)
+        }
         prefs.saveAlertMessage(config.message)
     }
+
+    override suspend fun verifyPanicPassword(candidate: String): Boolean =
+        prefs.verifyPanicPassword(candidate)
 
     override suspend fun saveContact(contact: Contact) {
         db.contactDao().insertContact(contact.toEntity())
@@ -44,15 +52,21 @@ class AlertRepositoryImpl @Inject constructor(
     }
 
     override suspend fun dispatchAlert(config: AlertConfig): Result<Unit> = runCatching {
+        // SMS is sent locally first — works without internet
+        val smsContacts = config.contacts.filter { AlertChannel.SMS in it.channels }
+        smsSender.sendBulk(smsContacts, config.message)
+
         val payload = AlertPayloadDto(
             message    = config.message,
             recipients = config.contacts.map { it.toDto() }
         )
         val response = api.dispatchAlert(payload)
         if (!response.isSuccessful) {
-            error("Falha ao disparar alerta: ${response.code()}")
+            error("Falha ao disparar alerta via API: ${response.code()}")
         }
     }
+
+    // ── Mappers ──────────────────────────────────────────────────────────────────
 
     private fun ContactEntity.toDomain() = Contact(
         id       = id,

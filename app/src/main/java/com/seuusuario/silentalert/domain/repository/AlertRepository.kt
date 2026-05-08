@@ -9,4 +9,5 @@ interface AlertRepository {
     suspend fun saveContact(contact: Contact)
     suspend fun deleteContact(contactId: Long)
     suspend fun dispatchAlert(config: AlertConfig): Result<Unit>
+    suspend fun verifyPanicPassword(candidate: String): Boolean
 }
